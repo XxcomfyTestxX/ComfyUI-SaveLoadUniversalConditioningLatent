@@ -207,7 +207,8 @@ class LoadUniversalConditioning:
 
         data = torch.load(
             conditioning_path,
-            map_location="cpu"
+            map_location="cpu",
+            weights_only=False
         )
 
         print(
@@ -336,7 +337,8 @@ class LoadUniversalLatent:
 
         data = torch.load(
             latent_path,
-            map_location="cpu"
+            map_location="cpu",
+            weights_only=False
         )
 
         print(
