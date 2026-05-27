@@ -1,5 +1,20 @@
-ComfyUI-SaveLoadUniversalConditioningLatent
 
-It is meant to be a generalization of the great https://github.com/endman100/ComfyUI-SaveAndLoadPromptCondition, meant to be able to save any (Or at least LTXV/Wan) complex conditionings, so it is possible to:
+# ComfyUI Nodes: SaveConditioning and LoadConditioning
 
-(Encoding) -> KSampler -> (Decoding) in three phases, only using the big diffusion_model in the second one, so a lot of RAM can be saved when running on low CPU-ram environments, like Colab.
+## SaveConditioning Node
+
+### Description
+The `SaveConditioning` node is designed to save conditioning data to binary files. This is useful for storing and reusing conditioning information across different sessions or applications.
+
+### Input Types
+- **conditionings**: A list of tuples where each tuple contains text embeds data and a dictionary with a "pooled_output" key. //SDXL
+
+
+## LoadConditioning Node
+
+### Description
+The `LoadConditioning` node is designed to load conditioning data from binary files. This allows for the reuse of previously saved conditioning information.
+
+### Return Types
+- **conditioning**: A list of conditioning data.
+
