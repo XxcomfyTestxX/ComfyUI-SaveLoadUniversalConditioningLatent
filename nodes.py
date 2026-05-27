@@ -1,8 +1,6 @@
 import os
-import time
 import torch
 import hashlib
-import pickle
 from pathlib import Path
 
 import folder_paths
@@ -14,119 +12,109 @@ from comfy.cli_args import args
 # =========================================================
 
 if args.base_directory:
-    base_path = os.path.join(
-        Path(os.path.abspath(args.base_directory)).parent.parent,
-        "models"
-    )
+    comfy_root = Path(os.path.abspath(args.base_directory)).parent.parent
 else:
-    base_path = os.path.join(
-        Path(os.path.dirname(os.path.realpath(__file__))).parent.parent,
-        "models"
-    )
+    comfy_root = Path(
+        os.path.dirname(os.path.realpath(__file__))
+    ).parent.parent
 
-conditioning_dir = os.path.join(base_path, "universal_conditionings")
-latent_dir = os.path.join(base_path, "universal_latents")
+models_dir = os.path.join(comfy_root, "models")
+input_dir = os.path.join(comfy_root, "input")
+
+conditioning_dir = os.path.join(models_dir, "conditionings")
+latent_dir = input_dir
 
 os.makedirs(conditioning_dir, exist_ok=True)
 os.makedirs(latent_dir, exist_ok=True)
 
-folder_paths.folder_names_and_paths["universal_conditionings"] = (
+folder_paths.folder_names_and_paths["conditionings"] = (
     [conditioning_dir],
     [".bin"]
 )
 
 folder_paths.folder_names_and_paths["universal_latents"] = (
     [latent_dir],
-    [".bin"]
+    [".latent"]
 )
 
 
 # =========================================================
-# UNIVERSAL SERIALIZATION
+# FILE NAMING
+# =========================================================
+
+def get_next_filename(directory, prefix, extension):
+
+    existing = []
+
+    for file in os.listdir(directory):
+
+        if file.startswith(prefix) and file.endswith(extension):
+
+            try:
+
+                number = int(
+                    file[len(prefix):-len(extension)].replace("_", "")
+                )
+
+                existing.append(number)
+
+            except:
+                pass
+
+    next_number = 1
+
+    if existing:
+        next_number = max(existing) + 1
+
+    return f"{prefix}{next_number:05d}_{extension}"
+
+
+# =========================================================
+# UNIVERSAL CPU SERIALIZATION
 # =========================================================
 
 def recursive_cpu(obj):
-    """
-    Recursively moves ALL tensors to CPU.
-    Supports arbitrary nested structures.
-    """
 
     if isinstance(obj, torch.Tensor):
+
         return obj.detach().cpu()
 
     elif isinstance(obj, dict):
+
         return {
             k: recursive_cpu(v)
             for k, v in obj.items()
         }
 
     elif isinstance(obj, list):
+
         return [
             recursive_cpu(v)
             for v in obj
         ]
 
     elif isinstance(obj, tuple):
+
         return tuple(
             recursive_cpu(v)
             for v in obj
         )
 
     elif hasattr(obj, "__dict__"):
-        # custom classes (LTXV often uses these)
+
         for key in vars(obj):
+
             try:
+
                 setattr(
                     obj,
                     key,
                     recursive_cpu(getattr(obj, key))
                 )
+
             except:
                 pass
-        return obj
 
-    return obj
-
-
-def recursive_cuda(obj, device="cuda"):
-    """
-    Optional reload back to CUDA.
-    """
-
-    if isinstance(obj, torch.Tensor):
-        try:
-            return obj.to(device)
-        except:
-            return obj
-
-    elif isinstance(obj, dict):
-        return {
-            k: recursive_cuda(v, device)
-            for k, v in obj.items()
-        }
-
-    elif isinstance(obj, list):
-        return [
-            recursive_cuda(v, device)
-            for v in obj
-        ]
-
-    elif isinstance(obj, tuple):
-        return tuple(
-            recursive_cuda(v, device)
-            for v in obj
-        )
-
-    elif hasattr(obj, "__dict__"):
-        for key in vars(obj):
-            try:
-                setattr(
-                    obj,
-                    key,
-                    recursive_cuda(getattr(obj, key), device)
-                )
-            except:
-                pass
         return obj
 
     return obj
@@ -139,10 +127,12 @@ def recursive_cuda(obj, device="cuda"):
 class SaveUniversalConditioning:
 
     def __init__(self):
+
         self.output_dir = conditioning_dir
 
     @classmethod
     def INPUT_TYPES(cls):
+
         return {
             "required": {
                 "conditioning": ("CONDITIONING",),
@@ -156,14 +146,31 @@ class SaveUniversalConditioning:
 
     def save(self, conditioning):
 
-        filename = f"{time.time()}_conditioning.bin"
-        path = os.path.join(self.output_dir, filename)
+        filename = get_next_filename(
+            self.output_dir,
+            "Conditioning_",
+            ".bin"
+        )
+
+        save_path = os.path.join(
+            self.output_dir,
+            filename
+        )
 
         data = recursive_cpu(conditioning)
 
-        torch.save(data, path)
+        torch.save(data, save_path)
 
-        print(f"[UniversalConditioning] saved -> {path}")
+        torch.cuda.empty_cache()
+
+        try:
+            torch.cuda.ipc_collect()
+        except:
+            pass
+
+        print(
+            f"[SaveUniversalConditioning] Saved: {save_path}"
+        )
 
         return {}
 
@@ -176,11 +183,12 @@ class LoadUniversalConditioning:
 
     @classmethod
     def INPUT_TYPES(cls):
+
         return {
             "required": {
                 "conditioning_file": (
                     folder_paths.get_filename_list(
-                        "universal_conditionings"
+                        "conditionings"
                     ),
                 ),
             }
@@ -192,14 +200,18 @@ class LoadUniversalConditioning:
 
     def load(self, conditioning_file):
 
-        path = folder_paths.get_full_path(
-            "universal_conditionings",
+        conditioning_path = folder_paths.get_full_path(
+            "conditionings",
             conditioning_file
         )
 
         data = torch.load(
-            path,
+            conditioning_path,
             map_location="cpu"
+        )
+
+        print(
+            f"[LoadUniversalConditioning] Loaded: {conditioning_path}"
         )
 
         return (data,)
@@ -207,17 +219,34 @@ class LoadUniversalConditioning:
     @classmethod
     def IS_CHANGED(cls, conditioning_file):
 
-        path = folder_paths.get_full_path(
-            "universal_conditionings",
+        conditioning_path = folder_paths.get_full_path(
+            "conditionings",
             conditioning_file
         )
 
         m = hashlib.sha256()
 
-        with open(path, "rb") as f:
+        with open(conditioning_path, "rb") as f:
             m.update(f.read())
 
         return m.digest().hex()
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, conditioning_file):
+
+        conditioning_path = folder_paths.get_full_path(
+            "conditionings",
+            conditioning_file
+        )
+
+        if not os.path.exists(conditioning_path):
+
+            return (
+                f"Invalid conditioning file: "
+                f"{conditioning_path}"
+            )
+
+        return True
 
 
 # =========================================================
@@ -227,10 +256,12 @@ class LoadUniversalConditioning:
 class SaveUniversalLatent:
 
     def __init__(self):
+
         self.output_dir = latent_dir
 
     @classmethod
     def INPUT_TYPES(cls):
+
         return {
             "required": {
                 "latent": ("LATENT",),
@@ -244,14 +275,31 @@ class SaveUniversalLatent:
 
     def save(self, latent):
 
-        filename = f"{time.time()}_latent.bin"
-        path = os.path.join(self.output_dir, filename)
+        filename = get_next_filename(
+            self.output_dir,
+            "Latent_",
+            ".latent"
+        )
+
+        save_path = os.path.join(
+            self.output_dir,
+            filename
+        )
 
         data = recursive_cpu(latent)
 
-        torch.save(data, path)
+        torch.save(data, save_path)
 
-        print(f"[UniversalLatent] saved -> {path}")
+        torch.cuda.empty_cache()
+
+        try:
+            torch.cuda.ipc_collect()
+        except:
+            pass
+
+        print(
+            f"[SaveUniversalLatent] Saved: {save_path}"
+        )
 
         return {}
 
@@ -264,6 +312,7 @@ class LoadUniversalLatent:
 
     @classmethod
     def INPUT_TYPES(cls):
+
         return {
             "required": {
                 "latent_file": (
@@ -280,14 +329,18 @@ class LoadUniversalLatent:
 
     def load(self, latent_file):
 
-        path = folder_paths.get_full_path(
+        latent_path = folder_paths.get_full_path(
             "universal_latents",
             latent_file
         )
 
         data = torch.load(
-            path,
+            latent_path,
             map_location="cpu"
+        )
+
+        print(
+            f"[LoadUniversalLatent] Loaded: {latent_path}"
         )
 
         return (data,)
@@ -295,17 +348,34 @@ class LoadUniversalLatent:
     @classmethod
     def IS_CHANGED(cls, latent_file):
 
-        path = folder_paths.get_full_path(
+        latent_path = folder_paths.get_full_path(
             "universal_latents",
             latent_file
         )
 
         m = hashlib.sha256()
 
-        with open(path, "rb") as f:
+        with open(latent_path, "rb") as f:
             m.update(f.read())
 
         return m.digest().hex()
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, latent_file):
+
+        latent_path = folder_paths.get_full_path(
+            "universal_latents",
+            latent_file
+        )
+
+        if not os.path.exists(latent_path):
+
+            return (
+                f"Invalid latent file: "
+                f"{latent_path}"
+            )
+
+        return True
 
 
 # =========================================================
