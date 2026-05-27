@@ -1,5 +1,7 @@
 
-# ComfyUI Nodes: SaveConditioning and LoadConditioning
+# Universal Load/SaveConditioning and Load/SaveLatent
+
+BASED ON https://github.com/endman100/ComfyUI-SaveAndLoadPromptCondition
 
 ## SaveConditioning Node
 
@@ -8,7 +10,6 @@ The `SaveConditioning` node is designed to save conditioning data to binary file
 
 ### Input Types
 - **conditionings**: A list of tuples where each tuple contains text embeds data and a dictionary with a "pooled_output" key. //SDXL
-
 
 ## LoadConditioning Node
 
